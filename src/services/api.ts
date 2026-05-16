@@ -69,19 +69,20 @@ export type ForgotPasswordResponse = {
   delivery?: 'smtp' | 'development';
 };
 
-const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
-  /\/$/,
-  '',
-);
+/* =========================
+   API BASE URL
+========================= */
 
-const deployedApiBaseUrl = 'https://task-management-app-osjt.onrender.com/api';
-
-const isLocalBrowser =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const configuredApiBaseUrl =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '');
 
 const API_BASE_URL =
-  configuredApiBaseUrl || (isLocalBrowser ? 'http://localhost:5000/api' : deployedApiBaseUrl);
+  configuredApiBaseUrl ||
+  'https://task-management-app-osjt.onrender.com/api';
+
+/* =========================
+   API RESPONSE TYPES
+========================= */
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -95,13 +96,11 @@ type ApiEnvelope<T> = {
   };
 };
 
-async function apiRequest<T>(path: string, options: RequestInit = {}) {
-  if (!API_BASE_URL) {
-    throw new Error(
-      'Frontend is not configured with VITE_API_BASE_URL. Add your deployed backend URL in Vercel environment variables.',
-    );
-  }
+/* =========================
+   COMMON API REQUEST
+========================= */
 
+async function apiRequest<T>(path: string, options: RequestInit = {}) {
   let response: Response;
 
   try {
@@ -114,7 +113,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}) {
     });
   } catch (_error) {
     throw new Error(
-      `Cannot connect to backend. Check that the TaskFlow backend is running at ${API_BASE_URL}.`,
+      `Cannot connect to backend. Check backend server at ${API_BASE_URL}`,
     );
   }
 
@@ -130,42 +129,9 @@ async function apiRequest<T>(path: string, options: RequestInit = {}) {
   return payload as ApiEnvelope<T>;
 }
 
-export const authApi = {
-  login(email: string, password: string) {
-    return apiRequest<AuthResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-  },
-  register(name: string, email: string, password: string) {
-    return apiRequest<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ name, email, password }),
-    });
-  },
-  setPassword(token: string, password: string) {
-    return apiRequest<{ user: AuthUser }>('/auth/set-password', {
-      method: 'POST',
-      headers: getAuthHeaders(token),
-      body: JSON.stringify({ password, confirmPassword: password }),
-    });
-  },
-  forgotPassword(email: string) {
-    return apiRequest<ForgotPasswordResponse | null>('/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-  resetPassword(token: string, password: string, confirmPassword: string) {
-    return apiRequest<{ message: string }>(`/auth/reset-password/${token}`, {
-      method: 'POST',
-      body: JSON.stringify({ password, confirmPassword }),
-    });
-  },
-  getGoogleAuthUrl(redirectUrl: string) {
-    return `${API_BASE_URL}/auth/google?redirect_url=${encodeURIComponent(redirectUrl)}`;
-  },
-};
+/* =========================
+   AUTH HEADERS
+========================= */
 
 function getAuthHeaders(token: string) {
   return {
@@ -173,13 +139,88 @@ function getAuthHeaders(token: string) {
   };
 }
 
-export const taskApi = {
-  async getTasks(token: string) {
-    return apiRequest<BackendTask[]>('/tasks?limit=100&page=1&sortBy=deadline', {
-      headers: getAuthHeaders(token),
+/* =========================
+   AUTH API
+========================= */
+
+export const authApi = {
+  login(email: string, password: string) {
+    return apiRequest<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
     });
   },
+
+  register(name: string, email: string, password: string) {
+    return apiRequest<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
+  },
+
+  setPassword(token: string, password: string) {
+    return apiRequest<{ user: AuthUser }>('/auth/set-password', {
+      method: 'POST',
+      headers: getAuthHeaders(token),
+      body: JSON.stringify({
+        password,
+        confirmPassword: password,
+      }),
+    });
+  },
+
+  forgotPassword(email: string) {
+    return apiRequest<ForgotPasswordResponse | null>(
+      '/auth/forgot-password',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      },
+    );
+  },
+
+  resetPassword(
+    token: string,
+    password: string,
+    confirmPassword: string,
+  ) {
+    return apiRequest<{ message: string }>(
+      `/auth/reset-password/${token}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          password,
+          confirmPassword,
+        }),
+      },
+    );
+  },
+
+  getGoogleAuthUrl(redirectUrl: string) {
+    return `${API_BASE_URL}/auth/google?redirect_url=${encodeURIComponent(
+      redirectUrl,
+    )}`;
+  },
 };
+
+/* =========================
+   TASK API
+========================= */
+
+export const taskApi = {
+  async getTasks(token: string) {
+    return apiRequest<BackendTask[]>(
+      '/tasks?limit=100&page=1&sortBy=deadline',
+      {
+        headers: getAuthHeaders(token),
+      },
+    );
+  },
+};
+
+/* =========================
+   NOTIFICATION API
+========================= */
 
 export const notificationApi = {
   async getNotifications(token: string) {
@@ -189,6 +230,10 @@ export const notificationApi = {
   },
 };
 
+/* =========================
+   DASHBOARD API
+========================= */
+
 export const dashboardApi = {
   async getSummary(token: string) {
     return apiRequest<DashboardSummary>('/dashboard/summary', {
@@ -197,26 +242,42 @@ export const dashboardApi = {
   },
 };
 
+/* =========================
+   REPORT API
+========================= */
+
 export const reportApi = {
   async getWeekly(token: string) {
     return apiRequest<WeeklyReportItem[]>('/reports/weekly', {
       headers: getAuthHeaders(token),
     });
   },
+
   async getStatusDistribution(token: string) {
-    return apiRequest<DistributionItem[]>('/reports/status-distribution', {
-      headers: getAuthHeaders(token),
-    });
+    return apiRequest<DistributionItem[]>(
+      '/reports/status-distribution',
+      {
+        headers: getAuthHeaders(token),
+      },
+    );
   },
+
   async getCategoryAnalysis(token: string) {
-    return apiRequest<DistributionItem[]>('/reports/category-analysis', {
-      headers: getAuthHeaders(token),
-    });
+    return apiRequest<DistributionItem[]>(
+      '/reports/category-analysis',
+      {
+        headers: getAuthHeaders(token),
+      },
+    );
   },
+
   async getProductivity(token: string) {
-    return apiRequest<ProductivityReport>('/reports/productivity', {
-      headers: getAuthHeaders(token),
-    });
+    return apiRequest<ProductivityReport>(
+      '/reports/productivity',
+      {
+        headers: getAuthHeaders(token),
+      },
+    );
   },
 };
 
