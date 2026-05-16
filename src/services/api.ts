@@ -79,14 +79,17 @@ const configuredApiBaseUrl =
 const isLocalhostApi = (value: string) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(value);
 
-function resolveApiBaseUrl() {
-  if (configuredApiBaseUrl) {
-    const isBrowser = typeof window !== 'undefined';
-    const isRunningOnLocalhost =
-      isBrowser &&
-      (window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1');
+const PRODUCTION_FALLBACK_API_BASE_URL =
+  'https://task-management-app-osjt.onrender.com/api';
 
+function resolveApiBaseUrl() {
+  const isBrowser = typeof window !== 'undefined';
+  const isRunningOnLocalhost =
+    isBrowser &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1');
+
+  if (configuredApiBaseUrl) {
     if (!(isLocalhostApi(configuredApiBaseUrl) && !isRunningOnLocalhost)) {
       return configuredApiBaseUrl;
     }
@@ -96,7 +99,11 @@ function resolveApiBaseUrl() {
     );
   }
 
-  return '/api';
+  if (isRunningOnLocalhost) {
+    return 'http://localhost:5000/api';
+  }
+
+  return PRODUCTION_FALLBACK_API_BASE_URL;
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
