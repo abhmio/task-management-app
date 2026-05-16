@@ -1,120 +1,225 @@
-const pool = require('../config/db');
+const { mongoose } = require('../config/db');
+const { getNextSequence } = require('./counterModel');
+const userModel = require('./userModel');
+
+const teamMemberSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    user_id: {
+      type: Number,
+      required: true,
+      index: true,
+    },
+    role: {
+      type: String,
+      enum: ['admin', 'member'],
+      default: 'member',
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false },
+);
+
+const teamSchema = new mongoose.Schema(
+  {
+    id: {
+      type: Number,
+      unique: true,
+      index: true,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+    description: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    created_by: {
+      type: Number,
+      required: true,
+      index: true,
+    },
+    members: {
+      type: [teamMemberSchema],
+      default: [],
+    },
+  },
+  {
+    timestamps: { createdAt: 'createdAt', updatedAt: true },
+    versionKey: false,
+  },
+);
+
+teamSchema.pre('save', async function assignNumericId(next) {
+  if (!this.id) {
+    this.id = await getNextSequence('teams');
+  }
+
+  next();
+});
+
+const Team = mongoose.models.Team || mongoose.model('Team', teamSchema);
+
+function mapMember(member, user) {
+  return {
+    team_id: member.team_id,
+    user_id: member.user_id,
+    role: member.role,
+    name: user?.name || '',
+    email: user?.email || '',
+    created_at: user?.created_at || user?.createdAt || null,
+  };
+}
 
 async function createTeam({ name, description, created_by }) {
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [teamResult] = await connection.execute(
-      `INSERT INTO teams (name, description, created_by)
-       VALUES (?, ?, ?)`,
-      [name, description, created_by],
-    );
-
-    await connection.execute(
-      `INSERT INTO team_members (team_id, user_id, role)
-       VALUES (?, ?, 'admin')`,
-      [teamResult.insertId, created_by],
-    );
-
-    await connection.commit();
-    return findTeamById(teamResult.insertId, created_by);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
-
-async function findTeamsForUser(userId) {
-  const [rows] = await pool.execute(
-    `SELECT DISTINCT
-      t.id,
-      t.name,
-      t.description,
-      t.created_by,
-      t.created_at,
-      tm.role AS membership_role,
-      creator.name AS created_by_name,
-      COUNT(all_members.user_id) AS member_count
-     FROM teams t
-     INNER JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?
-     LEFT JOIN team_members all_members ON all_members.team_id = t.id
-     LEFT JOIN users creator ON creator.id = t.created_by
-     GROUP BY t.id, tm.role, creator.name
-     ORDER BY t.created_at DESC`,
-    [userId],
-  );
-
-  return rows;
-}
-
-async function findTeamById(teamId, userId) {
-  const [teamRows] = await pool.execute(
-    `SELECT
-      t.id,
-      t.name,
-      t.description,
-      t.created_by,
-      t.created_at,
-      creator.name AS created_by_name
-     FROM teams t
-     INNER JOIN team_members membership
-       ON membership.team_id = t.id AND membership.user_id = ?
-     LEFT JOIN users creator ON creator.id = t.created_by
-     WHERE t.id = ?
-     LIMIT 1`,
-    [userId, teamId],
-  );
-
-  if (!teamRows[0]) {
+  const creator = await userModel.findDocumentById(created_by);
+  if (!creator) {
     return null;
   }
 
-  const [memberRows] = await pool.execute(
-    `SELECT
-      tm.team_id,
-      tm.user_id,
-      tm.role,
-      u.name,
-      u.email,
-      u.created_at
-     FROM team_members tm
-     INNER JOIN users u ON u.id = tm.user_id
-     WHERE tm.team_id = ?
-     ORDER BY tm.created_at ASC`,
-    [teamId],
+  const team = await Team.create({
+    name,
+    description: description || '',
+    createdBy: creator._id,
+    created_by: creator.id,
+    members: [
+      {
+        user: creator._id,
+        user_id: creator.id,
+        role: 'admin',
+      },
+    ],
+  });
+
+  return findTeamById(team.id, created_by);
+}
+
+async function findTeamsForUser(userId) {
+  const teams = await Team.find({ 'members.user_id': Number(userId) })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const creatorIds = [...new Set(teams.map((team) => team.created_by))];
+  const creators = await Promise.all(creatorIds.map((id) => userModel.findById(id)));
+  const creatorsMap = new Map(creators.filter(Boolean).map((user) => [user.id, user]));
+
+  return teams.map((team) => {
+    const membership = team.members.find((member) => member.user_id === Number(userId));
+    const creator = creatorsMap.get(team.created_by);
+
+    return {
+      id: team.id,
+      name: team.name,
+      description: team.description,
+      created_by: team.created_by,
+      created_at: team.createdAt,
+      membership_role: membership?.role || 'member',
+      created_by_name: creator?.name || '',
+      member_count: team.members.length,
+    };
+  });
+}
+
+async function findTeamById(teamId, userId) {
+  const team = await Team.findOne({
+    id: Number(teamId),
+    'members.user_id': Number(userId),
+  }).lean();
+
+  if (!team) {
+    return null;
+  }
+
+  const memberUsers = await Promise.all(
+    team.members.map((member) => userModel.findById(member.user_id)),
   );
+  const memberMap = new Map(
+    memberUsers.filter(Boolean).map((user) => [user.id, user]),
+  );
+  const creator = await userModel.findById(team.created_by);
 
   return {
-    ...teamRows[0],
-    members: memberRows,
+    id: team.id,
+    name: team.name,
+    description: team.description,
+    created_by: team.created_by,
+    created_at: team.createdAt,
+    created_by_name: creator?.name || '',
+    members: team.members.map((member) =>
+      mapMember(
+        {
+          ...member,
+          team_id: team.id,
+        },
+        memberMap.get(member.user_id),
+      ),
+    ),
   };
 }
 
 async function findTeamMembership(teamId, userId) {
-  const [rows] = await pool.execute(
-    `SELECT team_id, user_id, role
-     FROM team_members
-     WHERE team_id = ? AND user_id = ?
-     LIMIT 1`,
-    [teamId, userId],
-  );
+  const team = await Team.findOne(
+    {
+      id: Number(teamId),
+      'members.user_id': Number(userId),
+    },
+    { members: 1, id: 1 },
+  ).lean();
 
-  return rows[0] || null;
+  if (!team) {
+    return null;
+  }
+
+  const member = team.members.find((entry) => entry.user_id === Number(userId));
+  if (!member) {
+    return null;
+  }
+
+  return {
+    team_id: team.id,
+    user_id: member.user_id,
+    role: member.role,
+  };
 }
 
 async function addMember({ teamId, userId, role }) {
-  await pool.execute(
-    `INSERT INTO team_members (team_id, user_id, role)
-     VALUES (?, ?, ?)`,
-    [teamId, userId, role],
+  const user = await userModel.findDocumentById(userId);
+  if (!user) {
+    return;
+  }
+
+  await Team.updateOne(
+    { id: Number(teamId) },
+    {
+      $push: {
+        members: {
+          user: user._id,
+          user_id: user.id,
+          role,
+        },
+      },
+    },
   );
 }
 
 module.exports = {
+  Team,
   createTeam,
   findTeamsForUser,
   findTeamById,

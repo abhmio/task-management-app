@@ -1,55 +1,57 @@
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function buildTaskFilters(filters = {}) {
-  const where = [];
-  const values = [];
+  const query = {};
 
   if (filters.search) {
-    where.push('(t.title LIKE ? OR t.description LIKE ?)');
-    values.push(`%${filters.search}%`, `%${filters.search}%`);
+    const pattern = new RegExp(escapeRegex(filters.search.trim()), 'i');
+    query.$or = [{ title: pattern }, { description: pattern }];
   }
 
   if (filters.priority) {
-    where.push('t.priority = ?');
-    values.push(filters.priority);
+    query.priority = filters.priority;
   }
 
   if (filters.assigneeId) {
-    where.push('t.assignee_id = ?');
-    values.push(filters.assigneeId);
+    query.assignee_id = Number(filters.assigneeId);
   }
 
   if (filters.accessUserId) {
-    where.push('(t.created_by = ? OR t.assignee_id = ?)');
-    values.push(filters.accessUserId, filters.accessUserId);
+    query.$and = [
+      ...(query.$and || []),
+      {
+        $or: [
+          { created_by: Number(filters.accessUserId) },
+          { assignee_id: Number(filters.accessUserId) },
+        ],
+      },
+    ];
   }
 
   if (filters.status) {
     if (filters.status === 'pending') {
-      where.push("t.status <> 'Completed'");
+      query.status = { $ne: 'Completed' };
     } else if (filters.status === 'in progress') {
-      where.push("t.status = 'In Progress'");
+      query.status = 'In Progress';
     } else if (filters.status === 'to do') {
-      where.push("t.status = 'To Do'");
+      query.status = 'To Do';
     } else if (filters.status === 'completed') {
-      where.push("t.status = 'Completed'");
+      query.status = 'Completed';
     } else {
-      where.push('t.status = ?');
-      values.push(filters.status);
+      query.status = filters.status;
     }
   }
 
-  let orderBy = 't.deadline ASC, t.id DESC';
+  let sort = { deadline: 1, id: -1 };
   if (filters.sortBy === 'priority') {
-    orderBy =
-      "FIELD(t.priority, 'High', 'Medium', 'Low') ASC, t.deadline ASC, t.id DESC";
-  }
-  if (filters.sortBy === 'deadline') {
-    orderBy = 't.deadline ASC, t.id DESC';
+    sort = { priorityOrder: 1, deadline: 1, id: -1 };
   }
 
   return {
-    whereClause: where.length ? `WHERE ${where.join(' AND ')}` : '',
-    values,
-    orderBy,
+    query,
+    sort,
   };
 }
 

@@ -20,16 +20,10 @@ const env = {
   clientUrlPatterns,
   jwtSecret: process.env.JWT_SECRET || 'change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  db: {
-    host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
-    port: Number(process.env.DB_PORT || process.env.MYSQLPORT || 3306),
-    user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
-    password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
-    database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'taskflow',
-    waitForConnections: true,
-    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
-    queueLimit: 0,
-  },
+  mongoUri:
+    process.env.MONGO_URI ||
+    process.env.MONGODB_URI ||
+    'mongodb://127.0.0.1:27017/taskflow',
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
@@ -52,10 +46,7 @@ const env = {
 const requiredProductionEnv = [
   ['JWT_SECRET', env.jwtSecret && env.jwtSecret !== 'change-me'],
   ['CLIENT_URL or CLIENT_URLS', env.clientUrls.length > 0],
-  ['DB_HOST', Boolean(env.db.host)],
-  ['DB_PORT', Boolean(env.db.port)],
-  ['DB_USER', Boolean(env.db.user)],
-  ['DB_NAME', Boolean(env.db.database)],
+  ['MONGO_URI', Boolean(env.mongoUri)],
 ];
 
 if (env.nodeEnv === 'production') {

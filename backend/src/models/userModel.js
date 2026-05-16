@@ -1,107 +1,176 @@
-const pool = require('../config/db');
+const { mongoose } = require('../config/db');
+const { getNextSequence } = require('./counterModel');
 
-async function createUser({ name, email, password, role = 'user' }) {
-  const [result] = await pool.execute(
-    `INSERT INTO users (name, email, password, role)
-     VALUES (?, ?, ?, ?)`,
-    [name, email, password, role],
-  );
+const userSchema = new mongoose.Schema(
+  {
+    id: {
+      type: Number,
+      unique: true,
+      index: true,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
+    password: {
+      type: String,
+      default: null,
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+      index: true,
+    },
+    reset_token: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    reset_token_expiry: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    timestamps: { createdAt: 'createdAt', updatedAt: false },
+    versionKey: false,
+  },
+);
 
-  return findById(result.insertId);
-}
+userSchema.pre('save', async function assignNumericId(next) {
+  if (!this.id) {
+    this.id = await getNextSequence('users');
+  }
 
-async function findByEmail(email) {
-  const [rows] = await pool.execute(
-    `SELECT id, name, email, password, role, created_at,
-            reset_token, reset_token_expiry,
-            CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END AS has_password
-     FROM users
-     WHERE email = ?
-     LIMIT 1`,
-    [email],
-  );
+  next();
+});
 
-  return rows[0] || null;
-}
+const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-async function findById(id) {
-  const [rows] = await pool.execute(
-    `SELECT id, name, email, role, created_at,
-            reset_token, reset_token_expiry,
-            CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END AS has_password
-     FROM users
-     WHERE id = ?
-     LIMIT 1`,
-    [id],
-  );
-
-  return rows[0] || null;
-}
-
-async function updatePasswordById(id, password) {
-  await pool.execute(
-    `UPDATE users
-     SET password = ?, reset_token = NULL, reset_token_expiry = NULL
-     WHERE id = ?`,
-    [password, id],
-  );
-
-  return findById(id);
-}
-
-async function updatePasswordByEmail(email, password) {
-  const [result] = await pool.execute(
-    `UPDATE users
-     SET password = ?, reset_token = NULL, reset_token_expiry = NULL
-     WHERE email = ?`,
-    [password, email],
-  );
-
-  if (!result.affectedRows) {
+function mapUser(document, { includePassword = false } = {}) {
+  if (!document) {
     return null;
   }
 
-  return findByEmail(email);
+  return {
+    id: document.id,
+    name: document.name,
+    email: document.email,
+    ...(includePassword ? { password: document.password } : {}),
+    role: document.role,
+    created_at: document.createdAt,
+    reset_token: document.reset_token,
+    reset_token_expiry: document.reset_token_expiry,
+    has_password: document.password ? 1 : 0,
+  };
+}
+
+async function createUser({ name, email, password, role = 'user' }) {
+  const user = await User.create({
+    name,
+    email: email.toLowerCase(),
+    password,
+    role,
+  });
+
+  return findById(user.id);
+}
+
+async function findByEmail(email) {
+  const user = await User.findOne({ email: email.toLowerCase() }).lean(false);
+  return mapUser(user, { includePassword: true });
+}
+
+async function findById(id) {
+  const user = await User.findOne({ id: Number(id) }).lean(false);
+  return mapUser(user);
+}
+
+async function findDocumentById(id) {
+  return User.findOne({ id: Number(id) });
+}
+
+async function updatePasswordById(id, password) {
+  const user = await User.findOneAndUpdate(
+    { id: Number(id) },
+    {
+      $set: {
+        password,
+        reset_token: null,
+        reset_token_expiry: null,
+      },
+    },
+    { new: true },
+  );
+
+  return mapUser(user);
+}
+
+async function updatePasswordByEmail(email, password) {
+  const user = await User.findOneAndUpdate(
+    { email: email.toLowerCase() },
+    {
+      $set: {
+        password,
+        reset_token: null,
+        reset_token_expiry: null,
+      },
+    },
+    { new: true },
+  );
+
+  return mapUser(user, { includePassword: true });
 }
 
 async function saveResetToken(userId, resetToken, resetTokenExpiry) {
-  await pool.execute(
-    `UPDATE users
-     SET reset_token = ?, reset_token_expiry = ?
-     WHERE id = ?`,
-    [resetToken, resetTokenExpiry, userId],
+  await User.updateOne(
+    { id: Number(userId) },
+    {
+      $set: {
+        reset_token: resetToken,
+        reset_token_expiry: resetTokenExpiry,
+      },
+    },
   );
 }
 
 async function clearResetToken(userId) {
-  await pool.execute(
-    `UPDATE users
-     SET reset_token = NULL, reset_token_expiry = NULL
-     WHERE id = ?`,
-    [userId],
+  await User.updateOne(
+    { id: Number(userId) },
+    {
+      $set: {
+        reset_token: null,
+        reset_token_expiry: null,
+      },
+    },
   );
 }
 
 async function findByResetToken(resetToken) {
-  const [rows] = await pool.execute(
-    `SELECT id, name, email, password, role, created_at,
-            reset_token, reset_token_expiry,
-            CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END AS has_password
-     FROM users
-     WHERE reset_token = ?
-       AND reset_token_expiry IS NOT NULL
-       AND reset_token_expiry > NOW()
-     LIMIT 1`,
-    [resetToken],
-  );
+  const user = await User.findOne({
+    reset_token: resetToken,
+    reset_token_expiry: { $gt: new Date() },
+  });
 
-  return rows[0] || null;
+  return mapUser(user, { includePassword: true });
 }
 
 module.exports = {
+  User,
   createUser,
   findByEmail,
   findById,
+  findDocumentById,
   updatePasswordById,
   updatePasswordByEmail,
   saveResetToken,

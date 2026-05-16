@@ -1,18 +1,52 @@
-const pool = require('../config/db');
+const { Task } = require('./taskModel');
 
 async function getDashboardSummary(userId) {
-  const [rows] = await pool.execute(
-    `SELECT
-      COUNT(*) AS total_tasks,
-      SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_tasks,
-      SUM(CASE WHEN status <> 'Completed' THEN 1 ELSE 0 END) AS pending_tasks,
-      SUM(CASE WHEN status <> 'Completed' AND deadline < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks
-     FROM tasks
-     WHERE created_by = ? OR assignee_id = ?`,
-    [userId, userId],
-  );
+  const [summary] = await Task.aggregate([
+    {
+      $match: {
+        $or: [{ created_by: Number(userId) }, { assignee_id: Number(userId) }],
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total_tasks: { $sum: 1 },
+        completed_tasks: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0],
+          },
+        },
+        pending_tasks: {
+          $sum: {
+            $cond: [{ $ne: ['$status', 'Completed'] }, 1, 0],
+          },
+        },
+        overdue_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: ['$status', 'Completed'] },
+                  { $lt: ['$deadline', new Date()] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
 
-  return rows[0];
+  return (
+    summary || {
+      total_tasks: 0,
+      completed_tasks: 0,
+      pending_tasks: 0,
+      overdue_tasks: 0,
+    }
+  );
 }
 
 module.exports = { getDashboardSummary };

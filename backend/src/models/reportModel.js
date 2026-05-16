@@ -1,58 +1,159 @@
-const pool = require('../config/db');
+const { Task } = require('./taskModel');
+
+function startOfCurrentWeek() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const start = new Date(now);
+  start.setDate(now.getDate() + diff);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function endOfCurrentWeek() {
+  const end = new Date(startOfCurrentWeek());
+  end.setDate(end.getDate() + 7);
+  return end;
+}
 
 async function getWeeklyReport(userId) {
-  const [rows] = await pool.execute(
-    `SELECT
-      DAYNAME(deadline) AS day_name,
-      COUNT(*) AS task_count,
-      SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_count
-     FROM tasks
-     WHERE (created_by = ? OR assignee_id = ?)
-       AND YEARWEEK(deadline, 1) = YEARWEEK(CURDATE(), 1)
-     GROUP BY DAYOFWEEK(deadline), DAYNAME(deadline)
-     ORDER BY DAYOFWEEK(deadline)`,
-    [userId, userId],
-  );
-
-  return rows;
+  return Task.aggregate([
+    {
+      $match: {
+        $or: [{ created_by: Number(userId) }, { assignee_id: Number(userId) }],
+        deadline: {
+          $gte: startOfCurrentWeek(),
+          $lt: endOfCurrentWeek(),
+        },
+      },
+    },
+    {
+      $group: {
+        _id: { $dayOfWeek: '$deadline' },
+        day_name: {
+          $first: {
+            $arrayElemAt: [
+              [
+                '',
+                'Sunday',
+                'Monday',
+                'Tuesday',
+                'Wednesday',
+                'Thursday',
+                'Friday',
+                'Saturday',
+              ],
+              { $dayOfWeek: '$deadline' },
+            ],
+          },
+        },
+        task_count: { $sum: 1 },
+        completed_count: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0],
+          },
+        },
+      },
+    },
+    { $sort: { _id: 1 } },
+    {
+      $project: {
+        _id: 0,
+        day_name: 1,
+        task_count: 1,
+        completed_count: 1,
+      },
+    },
+  ]);
 }
 
 async function getStatusDistribution(userId) {
-  const [rows] = await pool.execute(
-    `SELECT status, COUNT(*) AS total
-     FROM tasks
-     WHERE created_by = ? OR assignee_id = ?
-     GROUP BY status`,
-    [userId, userId],
-  );
-
-  return rows;
+  return Task.aggregate([
+    {
+      $match: {
+        $or: [{ created_by: Number(userId) }, { assignee_id: Number(userId) }],
+      },
+    },
+    {
+      $group: {
+        _id: '$status',
+        total: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        status: '$_id',
+        total: 1,
+      },
+    },
+  ]);
 }
 
 async function getCategoryAnalysis(userId) {
-  const [rows] = await pool.execute(
-    `SELECT category, COUNT(*) AS total
-     FROM tasks
-     WHERE created_by = ? OR assignee_id = ?
-     GROUP BY category`,
-    [userId, userId],
-  );
-
-  return rows;
+  return Task.aggregate([
+    {
+      $match: {
+        $or: [{ created_by: Number(userId) }, { assignee_id: Number(userId) }],
+      },
+    },
+    {
+      $group: {
+        _id: '$category',
+        total: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        category: '$_id',
+        total: 1,
+      },
+    },
+  ]);
 }
 
 async function getProductivity(userId) {
-  const [rows] = await pool.execute(
-    `SELECT
-      COUNT(*) AS total_tasks,
-      SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_tasks,
-      SUM(CASE WHEN status <> 'Completed' AND deadline < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks
-     FROM tasks
-     WHERE created_by = ? OR assignee_id = ?`,
-    [userId, userId],
-  );
+  const [summary] = await Task.aggregate([
+    {
+      $match: {
+        $or: [{ created_by: Number(userId) }, { assignee_id: Number(userId) }],
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total_tasks: { $sum: 1 },
+        completed_tasks: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0],
+          },
+        },
+        overdue_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: ['$status', 'Completed'] },
+                  { $lt: ['$deadline', new Date()] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
 
-  return rows[0];
+  return (
+    summary || {
+      total_tasks: 0,
+      completed_tasks: 0,
+      overdue_tasks: 0,
+    }
+  );
 }
 
 module.exports = {

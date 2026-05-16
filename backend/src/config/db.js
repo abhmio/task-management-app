@@ -1,6 +1,24 @@
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
+
 const { env } = require('./env');
 
-const pool = mysql.createPool(env.db);
+async function connectDatabase() {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
 
-module.exports = pool;
+  mongoose.set('strictQuery', true);
+
+  await mongoose.connect(env.mongoUri, {
+    autoIndex: env.nodeEnv !== 'production',
+    serverSelectionTimeoutMS: 10000,
+    maxPoolSize: 10,
+  });
+
+  return mongoose.connection;
+}
+
+module.exports = {
+  connectDatabase,
+  mongoose,
+};
