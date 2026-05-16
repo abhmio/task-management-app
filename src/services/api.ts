@@ -71,7 +71,7 @@ export type ForgotPasswordResponse = {
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
-  'http://localhost:5000/api';
+  https://task-management-app-osjt.onrender.com/api';
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -98,7 +98,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}) {
     });
   } catch (_error) {
     throw new Error(
-      'Cannot connect to backend. Start the TaskFlow backend server on http://localhost:5000.',
+      'Cannot connect to backend. Start the TaskFlow backend server on https://task-management-app-osjt.onrender.com',
     );
   }
 
