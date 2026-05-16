@@ -76,9 +76,28 @@ export type ForgotPasswordResponse = {
 const configuredApiBaseUrl =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '');
 
-const API_BASE_URL =
-  configuredApiBaseUrl ||
-  'https://task-management-app-osjt.onrender.com/api';
+const isLocalhostApi = (value: string) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(value);
+
+function resolveApiBaseUrl() {
+  if (configuredApiBaseUrl) {
+    if (!(import.meta.env.PROD && isLocalhostApi(configuredApiBaseUrl))) {
+      return configuredApiBaseUrl;
+    }
+    console.warn(
+      '[TaskFlow] Ignoring localhost VITE_API_BASE_URL in production:',
+      configuredApiBaseUrl,
+    );
+  }
+
+  if (import.meta.env.PROD) {
+    return '/api';
+  }
+
+  return 'http://localhost:5000/api';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 /* =========================
    API RESPONSE TYPES
