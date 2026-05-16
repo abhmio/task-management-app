@@ -80,13 +80,13 @@ const isLocalhostApi = (value: string) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(value);
 
 function resolveApiBaseUrl() {
-  const isBrowser = typeof window !== 'undefined';
-  const isRunningOnLocalhost =
-    isBrowser &&
-    (window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1');
-
   if (configuredApiBaseUrl) {
+    const isBrowser = typeof window !== 'undefined';
+    const isRunningOnLocalhost =
+      isBrowser &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
     if (!(isLocalhostApi(configuredApiBaseUrl) && !isRunningOnLocalhost)) {
       return configuredApiBaseUrl;
     }
@@ -94,10 +94,6 @@ function resolveApiBaseUrl() {
       '[TaskFlow] Ignoring localhost VITE_API_BASE_URL outside local runtime:',
       configuredApiBaseUrl,
     );
-  }
-
-  if (isRunningOnLocalhost) {
-    return 'http://localhost:5000/api';
   }
 
   return '/api';
