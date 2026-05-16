@@ -69,9 +69,19 @@ export type ForgotPasswordResponse = {
   delivery?: 'smtp' | 'development';
 };
 
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
+  /\/$/,
+  '',
+);
+
+const deployedApiBaseUrl = 'https://task-management-app-osjt.onrender.com/api';
+
+const isLocalBrowser =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
-  https://task-management-app-osjt.onrender.com/api';
+  configuredApiBaseUrl || (isLocalBrowser ? 'http://localhost:5000/api' : deployedApiBaseUrl);
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -86,6 +96,12 @@ type ApiEnvelope<T> = {
 };
 
 async function apiRequest<T>(path: string, options: RequestInit = {}) {
+  if (!API_BASE_URL) {
+    throw new Error(
+      'Frontend is not configured with VITE_API_BASE_URL. Add your deployed backend URL in Vercel environment variables.',
+    );
+  }
+
   let response: Response;
 
   try {
@@ -98,7 +114,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}) {
     });
   } catch (_error) {
     throw new Error(
-      'Cannot connect to backend. Start the TaskFlow backend server on https://task-management-app-osjt.onrender.com',
+      `Cannot connect to backend. Check that the TaskFlow backend is running at ${API_BASE_URL}.`,
     );
   }
 
